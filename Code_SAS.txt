@@ -1,0 +1,82 @@
+# Clear memory
+rm(list = ls())
+
+# Set workspace
+setwd("/Users/christinanguyen/Desktop/BUAN 6337/Data")
+
+library(dplyr)
+library(corrplot)
+
+# Import data
+productivity.df <- read.csv("garments_worker_productivity.csv")
+
+# Explore variables
+summary(productivity.df)
+
+num_vars <- names(productivity.df)[sapply(productivity.df, is.numeric)]
+
+par(mfrow = c(3, 4))
+
+for (variable in num_vars) {
+  hist(productivity.df[[variable]],
+       main = paste("Histogram of", variable),
+       col = "lightblue",
+       border = "black",
+       xlab = variable)
+}
+
+par(mfrow = c(1, 4))
+char_vars <- sapply(productivity.df, is.character)
+for (variable in names(productivity.df)[char_vars]) {
+  counts <- table(productivity.df[[variable]])
+  barplot(counts, main = variable, col = rainbow(length(counts)))
+}
+par(mfrow = c(1, 1))  # Reset the layout
+
+productivity.df <- productivity.df %>%
+  select(-c(date, team, idle_time, idle_men)) %>% # Drop date and team
+  mutate(department = gsub("sweing", "sewing", department), # Correct spelling
+         department = gsub("finishing ", "finishing", department)) %>% # Remove extra space
+  filter(quarter != "Quarter5") # Remove rows
+
+# Assume wip = N/A means there are no products in progress
+productivity.df$wip[is.na(productivity.df$wip)] <- 0
+#median_wip <- median(productivity.df$wip, na.rm = TRUE)
+
+# Remove outliers
+selected_cols <- c("targeted_productivity", "smv", "wip", "incentive")
+
+# Function to remove outliers based on IQR
+remove_outliers <- function(data, columns, multiplier = 1.5) {
+  data_no_outliers <- data
+  for (col in columns) {
+    q1 <- quantile(data[, col], 0.25)
+    q3 <- quantile(data[, col], 0.75)
+    iqr <- q3 - q1
+    lower_bound <- q1 - multiplier * iqr
+    upper_bound <- q3 + multiplier * iqr
+    data_no_outliers <- data_no_outliers[which(data_no_outliers[, col] >= lower_bound & data_no_outliers[, col] <= upper_bound), ]
+  }
+  return(data_no_outliers)
+}
+
+# Remove outliers for selected columns
+productivity.df <- remove_outliers(productivity.df, selected_cols, multiplier = 1.5)
+
+
+# Create a correlation table for numeric variables
+productivity.corr <- productivity.df %>%
+  select_if(is.numeric) %>% # Select only numeric variables
+  cor()
+
+# Visualize the correlation table
+corrplot(productivity.corr, method = "number", type = "lower", bg = "grey")
+round(cor.mtest(productivity.corr)$p, 3) #p-values
+
+# Linear regression
+full_model <- lm(actual_productivity ~., data = productivity.df)
+summary(full_model)
+
+# Backwards
+final_model <- step(full_model, direction = "backward")
+summary(final_model)
